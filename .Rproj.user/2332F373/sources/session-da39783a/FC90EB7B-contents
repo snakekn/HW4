@@ -4,10 +4,16 @@ author: "Nadav Kempinski"
 date: "`r Sys.Date()`"
 editor: visual
 format: 
-  html:
-    embed-resources: true
-    code-fold: true
-    theme: lux
+  pdf:
+    documentclass: article     # or 'report', 'book'
+    number-sections: true
+    toc: true
+    keep-tex: true             # optional: keeps the .tex file for debugging
+    fig-cap-location: top      # or 'bottom', depends on your preference
+    geometry: margin=1in       # adjusts page margins
+    fontsize: 11pt             # can change to 10pt, 12pt, etc.
+    linestretch: 1.5           # improves readability
+    papersize: letter          # or 'a4'
 execute:
   eval: true
   message: false
@@ -38,7 +44,7 @@ To analyze text using episode transcripts, we will follow these steps:
 1) Import our data, tidy, and categorize by episode.
 2) Tokenize the data and remove stop words.
 3) Visualize words by season using a column graph and a wordcloud.
-4) Attach sentiment to each word using XXX
+4) Attach sentiment to each word using the NRC lexicon.
 5) Analyze how sentiment changes throughout the season.
 
 ::: {.panel-tabset}
