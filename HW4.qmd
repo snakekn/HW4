@@ -1,0 +1,138 @@
+---
+title: "Time Series Analysis"
+author: "Nadav Kempinski"
+date: "`r Sys.Date()`"
+editor: visual
+format: 
+  html:
+    embed-resources: true
+    code-fold: true
+    theme: lux
+execute:
+  eval: true
+  message: false
+  warning: false
+toc: true
+---
+
+## Overview
+
+Santa Barbara Coastal LTER (Long-Term Ecological Research) organization has collected data on local water chemistry since 2000. We can utilize the various nutrient samples and analyze each site using hierarchical clustering to determine how similar a site's nutrient profile is to other locations.
+
+Data for ammonium, nitrate, phosphate, conductivity, dissolved nitrogen, and dissolved phosphorous are in micrometers. Data for conductivity is in microsiemens per centimeter.
+
+### Data citation
+
+Santa Barbara Coastal LTER and J. Melack. 2019. SBC LTER: Land: Stream chemistry in the Santa Barbara Coastal drainage area, ongoing since 2000 ver 16. Environmental Data Initiative. <https://doi.org/10.6073/pasta/67a558a24ceed9a0a5bf5e46ab841174>
+
+### Pseudocode: how to process the data
+
+To product dendrograms and cluster our data, we'll follow these steps:
+
+1)  Import and clean our data to reduce missingness of our data and summarize data by our site.
+2)  Evaluate our data for interesting trends or correlations
+3)  Select and scale the numeric date, then reintroduce the site name as the rowname for each row
+4)  Determine the dissimilarity value between sites using Euclidian distances
+5)  Create dendrograms using single and complete linkage clustering (for purposes of comparison)
+6)  Develop a tanglegram to determine how different the two resulting dendrograms are due to their linkage method
+
+## Intaking Data
+
+### Import & prepare the data
+
+We'll import the stream chemistry data for the Santa Barbara Coastal drainage area, but the data includes many missing data points ("NAs"). Data types, such as where more than 50% of collected data points are missing are dropped (such as total suspended solids). All observations are then grouped by site and remaining variables are summarized as the mean of all observations.
+
+```{r data}
+#| code-summary: "Code: Import Data"
+#| output: FALSE
+
+### Packages
+library(tidyverse)
+library(here)
+library(janitor)
+library(tsibble)
+library(feasts)
+library(fable)
+
+### Data Import
+fish_data = read_csv(here("data","willamette_fish_passage.csv"), ) |>
+  janitor::clean_names() |>
+  select(date, coho, jack_coho, steelhead,temp_c) |>
+  mutate(across(everything(), ~replace_na(.,0)))
+
+fish_ts = fish_data |>
+  mutate(date = lubridate::mdy(date)) |> 
+  as_tsibble(key = NULL, index = date)
+  
+```
+
+### Conduct exploratory data analysis
+
+A biplot using principal component analysis on the variables under consideration will help us determine if there are any similarities between chemical compositions at sites.
+
+```{r, eda-heatmap}
+#| code-summary: "Code: Create a Heatmap"
+#| fig-cap:  A heat map describes the relationships between various variables in our dataset. The correlated values demonstrate that various chemicals may be correlated with one another. When we create a dendrogram, we'd expect these chemicals to be similarly grouped with one another. Highly correlated nutrients (dissolved nitrogen with nitrate, and dissolved phosphorous with phosphate) indicate a relationship between the two in site conditions. Sites with high concentrations in one are likely to be related to sites with high conditions of the other.
+#| fig-lab: heatmap
+
+corr_data = stream |>
+  select(-site_code) |>
+  cor() |>
+  reshape2::melt() |>
+  filter(as.numeric(Var1) < as.numeric(Var2))
+
+
+stream |>
+  select(-site_code) |>
+  cor() |>
+  ggcorrplot::ggcorrplot(
+    method = "circle",
+    type='upper',
+    outline.col = "black",
+  ) +
+  geom_text(
+    data = corr_data,
+    aes(Var1, Var2, label = round(value, 2)),  # Round correlation values
+    color = "black",
+    nudge_y = 0.4
+  )
+```
+
+```{r, eda-density}
+#| code-summary: "Code: Create a Density Histogram"
+#| fig-cap:  A density plot shows how water chemistry is varied between nutrients of interest. Data is shown in log micrometers or log uS/cm for specific conductivity. The distribution of total dissolved phosphorous, phosphate, and ammonium are similarly grouped, while nitrate and dissolved nitrogen are closely related. Water conditions may pose co-occurrence of specific nutrients. Again, this shows how sites may be similar in nutrient profile.
+#| fig-lab: density
+
+stream |>
+  pivot_longer(cols=-site_code,names_to="Analysis",values_to="value") |>
+  ggplot(aes(x=value,fill=Analysis)) +
+  geom_density(alpha = 0.5) +  # Allow user to see overlapping densities
+  scale_x_log10(labels = label_number(scale_cut = scales::cut_short_scale())) +  # Converts scientific notation to readable numbers
+  theme_minimal() +
+  labs(title = "Density Histogram of Water Chemistry Variables",
+       x = "Concentration (Log)",
+       y = "Count") +
+  scale_fill_viridis_d()
+```
+
+## Using Time Series Analysis
+
+A dendrogram is a method of visualizing groups using hierarchical clustering. Using aggregated nutrient profiles across sites, we can determine how similar sites are to each other, which can offer guidance on best management practices across sites.
+
+### Using the original time series
+
+
+### Analyze by Season
+
+
+### Get annual counts by species
+
+### Forecase salmon runs
+
+### Review: Why we use dendrograms
+
+Hierarchical clustering, using euclidian distances and single or complete linkages, provided us with a dendrogram. This can be visually utilized to determine similarities between data. Here, we're seeing how sites are similar based on their nutrient profiles. Site managers can utilize this information to create shared management plans, potentially assume similar species in one are in the next, and bridge learnings between sites.
+
+### Map of Sampled Locations in Santa Barbara
+
+![](data/sbmap.png)

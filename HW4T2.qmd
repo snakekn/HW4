@@ -1,0 +1,172 @@
+---
+title: "Time Series Analysis"
+author: "Nadav Kempinski"
+date: "`r Sys.Date()`"
+editor: visual
+format: 
+  html:
+    embed-resources: true
+    code-fold: true
+    theme: lux
+execute:
+  eval: true
+  message: false
+  warning: false
+toc: true
+---
+
+## Overview
+
+Reality television can shed light on the lives of marginalized individuals. We can utilize episode transcripts to analyze the language used in these shows, and determine if there are any trends or commonalities in the language used. This can help us understand how queer individuals are portrayed in reality television. 
+
+We will utilize episode transcripts for "The Ultimatum: Queer Love" (2023) to determine how sentiment and language around queer lifestyles changes from start to finish in this series.
+
+![The participants of Netflix's "The Ultimatum: Queer Love"](data/queer.jpg)
+
+### Data citation
+
+Transcript data for "The Ultimatum: Queer Love Subtitles" accessed from OpenSubtitles.org on March 3, 2025. https://www.opensubtitles.org/en/ssearch/sublanguageid-all/idmovie-1241682.
+
+The NRC lexicon dataset was published in Saif M. Mohammad and Peter Turney. (2013), 'Crowdsourcing a Word-Emotion Association Lexicon.' Computational Intelligence, 29(3): 436-465.
+
+Subtitle data was converted online from a .srt file to a .csv before processing.
+
+## Pseudocode: how to process the data
+
+To analyze text using episode transcripts, we will follow these steps:
+
+1) Import our data, tidy, and categorize by episode.
+2) Tokenize the data and remove stop words.
+3) Visualize words by season using a column graph and a wordcloud.
+4) Attach sentiment to each word using XXX
+5) Analyze how sentiment changes throughout the season.
+
+::: {.panel-tabset}
+### Import & tokenize the data
+We need to manipulate the subtitle data from how it's organized in subtitle files into tokens for analysis. We'll combine the data from both episodes and clean it for empty lines or spaces to easily process it. We'll convert lines into individual words, remove stop words (Words that don't provide additional meaning out of context, like "a", "and", "for"), and lemmatize (convert original words into their base component). Finally, we'll utilize the NRC Word-Emotion lexicon to assign sentiments to each word. 
+```{r data}
+#| code-summary: "Code: Prepare subtitle data"
+#| output: FALSE
+
+### Packages
+library(tidyverse)
+library(tidytext)
+library(pdftools)
+library(ggwordcloud)
+library(textdata)
+library(textstem)
+library(janitor)
+library(data.table)
+library(here)
+
+### Data Import
+text_pilot = fread(here("data","pilot.txt"), sep="\n") |>
+  clean_names() |>
+  rename(text=upbeat_dance_pop_song_plays)|>
+  mutate(source="pilot")
+
+text_finale = fread(here("data","finale.txt"), sep="\n") |>
+  clean_names() |>
+  rename(text=like_to_be_the_center_of_attention) |>
+  mutate(source="finale")
+
+factors = c("pilot","finale")
+
+# combine, remove empties, tokenize
+text_words = bind_rows(text_pilot,text_finale) |> # all transcripts are now in one dataframe
+  mutate(text = str_remove_all(text,"\\[.+?\\]"),
+         text = str_squish(str_replace_all(text, "[^a-zA-Z']", " ")),
+         source = factor(source, levels=factors,ordered=TRUE))|>
+  filter(text != "") |>
+  unnest_tokens(word,text) # data is now tokenized by word!
+
+# count words, remove stop words, lemmatize
+text_groups = text_words |>
+  group_by(source, word) |>
+  summarize(count = n(), .groups="drop") |>
+  anti_join(stop_words,by="word") |>
+  mutate(word = lemmatize_words(word))
+
+
+# import NRC lexicon because the native datafile keeps failing from the get_lexicon() call
+nrc <- read_delim(here::here("data/nrc.txt"),col_names=FALSE) |>
+  rename(word = "X1", sentiment = "X2", associated = "X3") |>
+  filter(associated=="1") |>
+  select(-associated)
+
+# bind sentiments & remove stop words
+text_sentiment = text_groups |>
+  inner_join(nrc, by="word") 
+
+words_removed = text_groups |>
+  filter(!(word %in% text_sentiment$word)) |>
+  distinct(word)
+
+```
+When including the lexicon sentiment data, 85 words were removed from the data. This may be because the words don't have specific sentiments attached, but it should also be noted that some words are newer terms, sometimes utilized specifically in queer communities, that the NRC data doesn't have context on. It's important to consider the history and development of a lexicon, and potentially create a community-specific option when analyzing text. For this report, we will not be creating a lexicon specific for the queer community. 
+
+### Visualize using wordclouds
+Let's first create a wordcloud using the top 30 spoken words in each episode. This will give an initial sense of the sentiment shift in each episode. 
+```{r wordcloud}
+#| code-summary: "Code: Create wordclouds"
+#| fig-cap: "The two wordclouds share similar top words, and it's hard to determine from this how the sentiment changes between the two episodes. As there are 1454 words utilized throughout both episodes, the top 30 may not be highly informative."
+#| 
+# only take the top 30 words
+text_30 = text_groups |>
+  group_by(source) |>
+  slice(1:30) |>
+  ungroup()
+
+ggplot(data = text_30, aes(label = word)) +
+  geom_text_wordcloud(aes(color = count, size = count), shape = "diamond") +
+  scale_size_area(max_size = 6) +
+  scale_color_gradientn(colors = c("darkgreen","blue","purple")) +
+  facet_wrap(~source)+
+  theme_minimal()
+```
+
+### Visualize quantitatively
+Now let's compare each type of sentiment identified in the episodes. 
+
+```{r column-graph}
+#| code-summary: "Code: Compare sentiment changes between the two episodes"
+#| fig-cap: "Faceted graphs by sentiment show that the pilot has higher rates of positive traits than the finale does. You can hover over the data in this graph to see what words are included in each bar."
+
+# create sentiment facet wrap 
+graph_sentiment = text_sentiment |>
+  ggplot(aes(x=source,y=count,group=word,color=source,fill=source)) +
+  geom_col()+
+  facet_wrap(~sentiment)+
+  theme_bw()+
+  labs(x="",y="Frequency",title="Graphs of Sentiment Change from Pilot to Finale")+
+  theme(legend.position = "none")
+
+plotly::ggplotly(graph_sentiment)
+```
+
+Finally, we can take the log difference between each sentiment type to see how the sentiment changes over time.
+```{r}
+#| code-summary: "Code: Create log graph of sentiment difference"
+#| fig-cap: "The log difference for each sentiment catagory. Positive numbers mean a greater frequency during the finale. Sadness, fear, and disgust were greatest during the finale, while joy and trust were mostly expressed at the start of the show."
+sentiment_source = text_sentiment |>
+  group_by(sentiment) |>
+  summarize(pilot_count = sum(source=="pilot"),
+            finale_count = sum(source=="finale"),
+            log_diff = log(finale_count / pilot_count),
+            pos_neg = ifelse(log_diff > 0, 'pos', 'neg'))
+
+sentiment_source |>
+  ggplot(aes(x=log_diff,y=fct_reorder(sentiment,log_diff),fill=pos_neg))+
+  geom_col()+
+  labs(x="Log Ratio of Sentiment Change (Finale / Pilot)",y="Sentiment",title="Change in Sentiment from Pilot to Finale")+
+  scale_fill_manual(values=c("pos"="slateblue","neg"="darkred"))+
+  theme_minimal()+
+  theme(legend.position = "none")
+
+```
+
+This analysis tells us that it may not have been a positive experience to go on this show, and that the time spent looking back harbored negative emotions for the participants.
+:::
+
+## Review
+We used subtitle data from the show "The Ultimatum" to demonstrate how text analysis tools allow us to track sentiment in text data of any kind. As the show catered to a queer community, which is a marginalized community, it's important to note that some words in the lexicon may provide inaccurate sentiment, as the usage of these terms have changed. Using lexicons specific to the community of interest may help reduce ambiguity in sentiment analysis. 

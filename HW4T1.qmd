@@ -1,0 +1,185 @@
+---
+title: "Time Series Analysis of Fish Passage"
+author: "Nadav Kempinski"
+date: "`r Sys.Date()`"
+editor: visual
+format: 
+  html:
+    embed-resources: true
+    code-fold: true
+    theme: lux
+execute:
+  eval: true
+  message: false
+  warning: false
+toc: false
+---
+
+## Overview
+
+Willamette Falls dam includes a fish ladder that was built in 1882. Since 2001, they've collected data on fish passage to track the population of fish species. We can utilize time series analysis to determine how the fish population has changed over time, and whether there are trends or annual changes that occur.
+
+Data is stored by each fish species and daily observed counts. Any date where no data was observed (i.e. NAs) is replaced with a zero value. We'll utilize data until the start of 2011.
+
+![A fish ladder near the Willamette Falls](data/ladder.jpg)
+
+### Data citation
+
+Willamette Falls fish ladder data were shared by and accessed from Columbia River DART (Data Access in Real Time), accessed January 25, 2023.
+
+## Pseudocode: how to process the data
+
+To produce a time series analysis and analyze trends, we'll follow these steps:
+
+1)  Import and clean our data to focus on specific species and prepare the time data.
+2)  Plot the fish passage data over time per species to view any interesting changes or trends.
+3)  Plot the data based on season to determine any seasonality.
+4)  Track annual totals of fish.
+
+You can click the tabs below to view each component of the time series analysis. A final review
+
+::: panel-tabset
+### Intaking data
+
+We'll use the "tsibble" data class to store our data, which is a tidy time series data frame. We'll import the fish passage data for the Willamette Falls dam, focusing on coho, jack coho, and steelhead species.
+
+```{r data}
+#| code-summary: "Code: Import Data"
+#| output: FALSE
+
+### Packages
+library(tidyverse)
+library(here)
+library(janitor)
+library(tsibble)
+library(feasts)
+library(fable)
+
+### Data Import
+fish_data = read_csv(here("data","willamette_fish_passage.csv"), ) |>
+  janitor::clean_names() |>
+  select(date, coho, jack_coho, steelhead,temp_c) |>
+  mutate(across(everything(), ~replace_na(., 0)))
+
+fish_ts = fish_data |>
+  mutate(date = lubridate::mdy(date)) |> 
+  as_tsibble(key = NULL, index = date) |>
+    pivot_longer(col=coho:steelhead, names_to = 'name', values_to = 'value')
+```
+
+### Plotting the time series
+
+Let's view all the fish passage data so we can get acquainted with our data and see if there are any overall patterns we can find.
+
+```{r}
+#| code-summary: "Code: Show Overall Time Series"
+#| fig-cap: "Each fish species is shown above throughout all years of data collection."
+fish_ts |>
+  ggplot(aes(x = date, y = value, color = name)) +
+  geom_line() +
+  facet_wrap(~name, ncol = 1, scales="free_y") +
+  labs(y = "Daily Passage Counts",x="Date",title="Daily Counts of Fish Passage Per Species")+
+  theme_minimal()+
+  scale_fill_viridis_b()
+```
+
+Some patterns that emerge from this per-species analysis:
+
+-   All species seem to have a seasonality component to their variation, which we can analyze later.
+-   Coho salmon seem to be increasing in total value in the last 4 years, indicating potential for a trend upwards in the total fish passage observed.
+-   Jack Coho Salmon seem to be the lowest observed species to travel through the fish ladder.
+
+### Analyze passage by season
+
+Because of the potential seasonal changes, let's plot these passages in a seasonplot to isolate the seasonal component.
+
+```{r}
+#| code-summary: "Code: Show Seasonal Plot"
+#| fig-cap: "A seasonal plot for each species shows a line for each year, helping to analyze variation in a calendar year."
+fish_ts |>
+  gg_season(y=value)+
+  theme_minimal()+
+  labs(x="Month",y="Daily Count",title="Season plot for each fish species over time")
+```
+
+Some outcomes from using a seasonplot:
+
+-   While coho and jack coho salmon varieties mainly utilize the ladder between August and November, steelhead can be seen traveling throughout many seasons during the year, with a peak between April and August. The ladder caters to varying fish species in different segments of the year.
+-   Coho salmon populations seem to be increasing throughout the years, while it's harder to make that statement for the other species.
+
+### Analyze passage by year
+
+We can determine whether there's a trend in each population by summing up passage counts per-year, and considering the yearly population counts. This hides the seasonal component we've already deduced.
+
+```{r}
+#| code-summary: "Code: Show Annual Counts"
+#| fig-cap: "Annual counts of each fish species helps determine whether a trend is occuring for any population. Species are plotted in different graphs to aid readers in recognizing potential cyclical activity."
+
+fish_ts |>
+  mutate(year=year(date)) |>
+  as_data_frame() |>
+  group_by(name,year) |>
+  summarize(total = sum(value), .groups="drop") |>
+  ggplot(aes(x=as.factor(year),y=total,color=name,group=name))+
+  geom_point() +
+  geom_line()+
+    facet_wrap(~name, ncol = 1, scales="free_y") +
+
+  theme_minimal()+
+  labs(x="Year",y="Annual Count",title="Annual Counts of Fish Passage per Species")
+```
+
+The annual counts hide seasonal changes by comparing yearly passage sightings. A few observations:
+
+-   The coho species has increased tremendously in recent years, but before then was relatively consistent. Some unobserved data may explain the sudden increase, but a trend might be occurring.
+-   The jack coho population varies up and down without an overall change in level, suggesting potential cyclicality.
+-   The steelhead population seems to be declining, but changes to the 2010 population may mean that other factors (or chance) are at play.
+
+### Create a predictive time series model
+
+Let's see what we would expect might occur in the future, based on the time series data we've witnessed thus far. We'll consider both trend and seasonal variations to be additive in nature, and use the Holt-Winters forecast method on the original time series data for each salmon population.
+
+First, let's see if we can create a model that predicts the past well, using data from 2001-2009 and testing on 2010-2011.
+
+```{r}
+#| code-summary: "Code: Predict fish passage on prior data"
+#| fig-cap: "A "
+
+fish_train = fish_ts |>
+  filter(year(date)<2010 & name=="coho")
+
+fish_test = fish_ts |>
+  filter(year(date)>=2010)
+
+fish_model_train = fish_train |>
+  model(ets = ETS(value ~ season(method="A")+trend(method="A")))
+
+fish_predict_train = broom::augment(fish_model_train)
+
+fish_predict_train |>
+  ggplot() +
+  geom_line(aes(x = date, y = value)) +
+  geom_line(aes(x = date, y = .fitted), color = "red", alpha = .7, size=0.5)+
+  facet_wrap(~name,ncol=1,scales = "free")+
+  theme_minimal()
+```
+
+It looks pretty good on the data it trained on. Let's test the model using data from 2010-2011 and determine how well it matches data it's never seen before.
+
+```{r}
+#| code-summary: "Code: Apply forecast to existing data"
+#| fig-cap: "Holt-Winter forecasting failed in this case due to the dataset having strong zero-inflation and sudden spikes, whereas Holt-Winter modeling is a method of exponential smoothing. ARIMA or other methods would be better suited for completing this analysis."
+
+fish_model_test = fish_model_train |>
+  forecast(h="2 years") 
+
+fish_model_test |>
+  autoplot(fish_ts)+
+  theme_minimal()+
+  labs(x="Date",y="Fish Passage",title="Predicting Fish Passage using Holt-Winter Forecasting")
+```
+:::
+
+# Review: Why we use time series
+
+Time series analysis can help us isolate time-based components from our final analysis. This can be helpful when trying to deduce seasonal or yearly trends and whether there are non-time-related factors that need to be considered.

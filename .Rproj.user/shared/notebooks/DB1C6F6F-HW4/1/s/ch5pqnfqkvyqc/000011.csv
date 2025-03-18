@@ -1,0 +1,15 @@
+"0","### Data Import
+fish_data = read_csv(here(""data"",""willamette_fish_passage.csv""), ) |>
+  janitor::clean_names() |># make the capitals easier to manage
+  select(date, coho, jack_coho, steelhead,temp_c) |>
+  mutate(across(everything(), ~replace_na(.,0)))
+"
+"2","[1mRows: [22m[34m3652[39m [1mColumns: [22m[34m16[39m"
+"2","[36m──[39m [1mColumn specification[22m [36m────────────────[39m
+[1mDelimiter:[22m "",""
+[31mchr[39m (2): Project, Date
+[32mdbl[39m (6): Chinook, Jack Chinook, Stee...
+[33mlgl[39m (8): Chinook Run, Wild Steelhead..."
+"2","
+[36mℹ[39m Use `spec()` to retrieve the full column specification for this data.
+[36mℹ[39m Specify the column types or set `show_col_types = FALSE` to quiet this message."
